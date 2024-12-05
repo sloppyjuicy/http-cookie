@@ -136,7 +136,7 @@ class HTTP::CookieJar
 
     # Returns the schema version of the database.
     def schema_version
-      @schema_version ||= @db.execute("PRAGMA user_version").first[0]
+      @schema_version ||= @db.execute("PRAGMA user_version").first["user_version"]
     rescue SQLite3::SQLException
       @logger.warn "couldn't get schema version!" if @logger
       return nil
@@ -400,8 +400,6 @@ class HTTP::CookieJar
         }
       end
     else
-      require 'cgi'
-
       def encode_www_form(enum)
         enum.map { |k, v| "#{CGI.escape(k)}=#{CGI.escape(v)}" }.join('&')
       end

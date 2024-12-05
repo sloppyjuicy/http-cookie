@@ -1,4 +1,25 @@
-## Unreleased
+## 1.0.8 (2024-12-05)
+
+- `Cookie#expires=` accepts `DateTime` objects. (#52) @luke-hill @flavorjones
+
+
+## 1.0.7 (2024-06-06)
+
+- Explicitly require "cgi" to avoid `NameError` in some applications. (#50 by @flavorjones)
+
+
+## 1.0.6 (2024-06-01)
+
+- Fix error formatting bug in HTTP::CookieJar::AbstractStore (#42 by @andrelaszlo)
+- Allow non-RFC 3986-compliant URLs (#45 by @c960657)
+- Add coverage for Ruby 3.2 and 3.3 (#46 by @flavorjones)
+- Quash ruby 3.4 warnings (#47 by @flavorjones)
+
+## 1.0.5 (2022-05-25)
+
+- Silence SQLite3 warnings
+
+## 1.0.4 (2021-06-07)
 
 - Support Mozilla's cookie storage format up to version 7.
 

@@ -1,9 +1,12 @@
 # :markup: markdown
+# frozen_string_literal: true
 require 'http/cookie/version'
+require 'http/cookie/uri_parser'
 require 'time'
 require 'uri'
 require 'domain_name'
 require 'http/cookie/ruby_compat'
+require 'cgi'
 
 module HTTP
   autoload :CookieJar, 'http/cookie_jar'
@@ -86,7 +89,7 @@ class HTTP::Cookie
 
   # The Expires attribute value as a Time object.
   #
-  # The setter method accepts a Time object, a string representation
+  # The setter method accepts a Time / DateTime object, a string representation
   # of date/time that Time.parse can understand, or `nil`.
   #
   # Setting this value resets #max_age to nil.  When #max_age is
@@ -275,7 +278,7 @@ class HTTP::Cookie
         logger = options[:logger]
         created_at = options[:created_at]
       end
-      origin = URI(origin)
+      origin = HTTP::Cookie::URIParser.parse(origin)
 
       [].tap { |cookies|
         Scanner.new(set_cookie, logger).scan_set_cookie { |name, value, attrs|
@@ -424,7 +427,7 @@ class HTTP::Cookie
   # Returns the domain, with a dot prefixed only if the domain flag is
   # on.
   def dot_domain
-    @for_domain ? '.' << @domain : @domain
+    @for_domain ? (+'.') << @domain : @domain
   end
 
   # Returns the domain attribute value as a DomainName object.
@@ -455,7 +458,7 @@ class HTTP::Cookie
     @origin.nil? or
       raise ArgumentError, "origin cannot be changed once it is set"
     # Delay setting @origin because #domain= or #path= may fail
-    origin = URI(origin)
+    origin = HTTP::Cookie::URIParser.parse(origin)
     if URI::HTTP === origin
       self.domain ||= origin.host
       self.path   ||= (origin + './').path
@@ -490,6 +493,8 @@ class HTTP::Cookie
   def expires= t
     case t
     when nil, Time
+    when DateTime
+      t = t.to_time
     else
       t = Time.parse(t)
     end
@@ -548,7 +553,7 @@ class HTTP::Cookie
   # Tests if it is OK to accept this cookie if it is sent from a given
   # URI/URL, `uri`.
   def acceptable_from_uri?(uri)
-    uri = URI(uri)
+    uri = HTTP::Cookie::URIParser.parse(uri)
     return false unless URI::HTTP === uri && uri.host
     host = DomainName.new(uri.host)
 
@@ -585,7 +590,7 @@ class HTTP::Cookie
     if @domain.nil?
       raise "cannot tell if this cookie is valid because the domain is unknown"
     end
-    uri = URI(uri)
+    uri = HTTP::Cookie::URIParser.parse(uri)
     # RFC 6265 5.4
     return false if secure? && !(URI::HTTPS === uri)
     acceptable_from_uri?(uri) && HTTP::Cookie.path_match?(@path, uri.path)
@@ -594,7 +599,7 @@ class HTTP::Cookie
   # Returns a string for use in the Cookie header, i.e. `name=value`
   # or `name="value"`.
   def cookie_value
-    "#{@name}=#{Scanner.quote(@value)}"
+    +"#{@name}=#{Scanner.quote(@value)}"
   end
   alias to_s cookie_value
 

@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
+# frozen_string_literal: false
 require File.expand_path('helper', File.dirname(__FILE__))
+require 'psych' if !defined?(YAML) && RUBY_VERSION == "1.9.2"
+require 'yaml'
 
 class TestHTTPCookie < Test::Unit::TestCase
   def setup
@@ -300,7 +303,8 @@ class TestHTTPCookie < Test::Unit::TestCase
       "name=Aaron; Domain=localhost; Expires=Sun, 06 Nov 2011 00:29:51 GMT; Path=/, " \
       "name=Aaron; Domain=localhost; Expires=Sun, 06 Nov 2011 00:29:51 GMT; Path=/; HttpOnly, " \
       "expired=doh; Expires=Fri, 04 Nov 2011 00:29:51 GMT; Path=/, " \
-      "a_path=some_path; Expires=Sun, 06 Nov 2011 00:29:51 GMT; Path=/some_path, " \
+      "a_path1=some_path; Expires=Sun, 06 Nov 2011 00:29:51 GMT; Path=/some_path, " \
+      "a_path2=some_path; Expires=Sun, 06 Nov 2011 00:29:51 GMT; Path=/some_path[], " \
       "no_path1=no_path; Expires=Sun, 06 Nov 2011 00:29:52 GMT, no_expires=nope; Path=/, " \
       "no_path2=no_path; Expires=Sun, 06 Nov 2011 00:29:52 GMT; no_expires=nope; Path, " \
       "no_path3=no_path; Expires=Sun, 06 Nov 2011 00:29:52 GMT; no_expires=nope; Path=, " \
@@ -311,17 +315,22 @@ class TestHTTPCookie < Test::Unit::TestCase
       "no_domain3=no_domain; Expires=Sun, 06 Nov 2011 00:29:53 GMT; no_expires=nope; Domain="
 
     cookies = HTTP::Cookie.parse cookie_str, url
-    assert_equal 15, cookies.length
+    assert_equal 16, cookies.length
 
     name = cookies.find { |c| c.name == 'name' }
     assert_equal "Aaron",             name.value
     assert_equal "/",                 name.path
     assert_equal Time.at(1320539391), name.expires
 
-    a_path = cookies.find { |c| c.name == 'a_path' }
-    assert_equal "some_path",         a_path.value
-    assert_equal "/some_path",        a_path.path
-    assert_equal Time.at(1320539391), a_path.expires
+    a_path1 = cookies.find { |c| c.name == 'a_path1' }
+    assert_equal "some_path",         a_path1.value
+    assert_equal "/some_path",        a_path1.path
+    assert_equal Time.at(1320539391), a_path1.expires
+
+    a_path2 = cookies.find { |c| c.name == 'a_path2' }
+    assert_equal "some_path",         a_path2.value
+    assert_equal "/some_path[]",      a_path2.path
+    assert_equal Time.at(1320539391), a_path2.expires
 
     no_expires = cookies.find { |c| c.name == 'no_expires' }
     assert_equal "nope", no_expires.value
@@ -708,8 +717,22 @@ class TestHTTPCookie < Test::Unit::TestCase
   end
 
   def test_expiration
-    cookie = HTTP::Cookie.new(cookie_values)
+    expires = Time.now + 86400
+    cookie = HTTP::Cookie.new(cookie_values(expires: expires))
 
+    assert_equal(expires, cookie.expires)
+    assert_equal false, cookie.expired?
+    assert_equal true, cookie.expired?(cookie.expires + 1)
+    assert_equal false, cookie.expired?(cookie.expires - 1)
+    cookie.expire!
+    assert_equal true, cookie.expired?
+  end
+
+  def test_expiration_using_datetime
+    expires = DateTime.now + 1
+    cookie = HTTP::Cookie.new(cookie_values(expires: expires))
+
+    assert_equal(expires.to_time, cookie.expires)
     assert_equal false, cookie.expired?
     assert_equal true, cookie.expired?(cookie.expires + 1)
     assert_equal false, cookie.expired?(cookie.expires - 1)
@@ -749,7 +772,7 @@ class TestHTTPCookie < Test::Unit::TestCase
     assert_equal 12, cookie.max_age
 
     cookie.max_age = -3
-    assert_equal -3, cookie.max_age
+    assert_equal(-3, cookie.max_age)
   end
 
   def test_session
@@ -939,6 +962,10 @@ class TestHTTPCookie < Test::Unit::TestCase
       cookie.origin = URI.parse('http://www.example.com/')
     }
 
+    cookie = HTTP::Cookie.new('a', 'b')
+    cookie.origin = HTTP::Cookie::URIParser.parse('http://example.com/path[]/')
+    assert_equal '/path[]/', cookie.path
+
     cookie = HTTP::Cookie.new('a', 'b', :domain => '.example.com')
     cookie.origin = URI.parse('http://example.org/')
     assert_equal false, cookie.acceptable?
@@ -1004,7 +1031,7 @@ class TestHTTPCookie < Test::Unit::TestCase
           'https://www.example.com/dir2/test.html',
         ]
       },
-      HTTP::Cookie.parse('a4=b; domain=example.com; path=/dir2/',
+      HTTP::Cookie.parse('a3=b; domain=example.com; path=/dir2/',
         URI('http://example.com/dir/file.html')).first => {
         true => [
           'https://example.com/dir2/test.html',
@@ -1020,7 +1047,19 @@ class TestHTTPCookie < Test::Unit::TestCase
           'file:///dir2/test.html',
         ]
       },
-      HTTP::Cookie.parse('a4=b; secure',
+      HTTP::Cookie.parse('a4=b; domain=example.com; path=/dir2[]/',
+        HTTP::Cookie::URIParser.parse('http://example.com/dir[]/file.html')).first => {
+        true => [
+          HTTP::Cookie::URIParser.parse('https://example.com/dir2[]/file.html'),
+          HTTP::Cookie::URIParser.parse('http://example.com/dir2[]/file.html'),
+        ],
+        false => [
+          HTTP::Cookie::URIParser.parse('https://example.com/dir[]/file.html'),
+          HTTP::Cookie::URIParser.parse('http://example.com/dir[]/file.html'),
+          'file:///dir2/test.html',
+        ]
+      },
+      HTTP::Cookie.parse('a5=b; secure',
         URI('https://example.com/dir/file.html')).first => {
         true => [
           'https://example.com/dir/test.html',
@@ -1032,7 +1071,7 @@ class TestHTTPCookie < Test::Unit::TestCase
           'file:///dir2/test.html',
         ]
       },
-      HTTP::Cookie.parse('a5=b',
+      HTTP::Cookie.parse('a6=b',
         URI('https://example.com/')).first => {
         true => [
           'https://example.com',
@@ -1041,7 +1080,7 @@ class TestHTTPCookie < Test::Unit::TestCase
           'file:///',
         ]
       },
-      HTTP::Cookie.parse('a6=b; path=/dir',
+      HTTP::Cookie.parse('a7=b; path=/dir',
         'http://example.com/dir/file.html').first => {
         true => [
           'http://example.com/dir',
@@ -1067,10 +1106,20 @@ class TestHTTPCookie < Test::Unit::TestCase
       hash.each { |expected, urls|
         urls.each { |url|
           assert_equal expected, cookie.valid_for_uri?(url), '%s: %s' % [cookie.name, url]
-          assert_equal expected, cookie.valid_for_uri?(URI(url)), "%s: URI(%s)" % [cookie.name, url]
+          assert_equal expected, cookie.valid_for_uri?(HTTP::Cookie::URIParser.parse(url)), "%s: URI(%s)" % [cookie.name, url]
         }
       }
     }
+  end
+
+  if YAML.name == 'Psych' && Psych::VERSION >= '3.1'
+    private def load_yaml(yaml)
+      YAML.safe_load(yaml, :permitted_classes => %w[Time HTTP::Cookie Mechanize::Cookie DomainName], :aliases => true)
+    end
+  else
+    private def load_yaml(yaml)
+      YAML.load(yaml)
+    end
   end
 
   def test_yaml_expires
@@ -1080,29 +1129,29 @@ class TestHTTPCookie < Test::Unit::TestCase
     assert_equal false, cookie.session?
     assert_equal nil, cookie.max_age
 
-    ycookie = YAML.load(cookie.to_yaml)
+    ycookie = load_yaml(cookie.to_yaml)
     assert_equal false, ycookie.session?
     assert_equal nil, ycookie.max_age
     assert_in_delta cookie.expires, ycookie.expires, 1
 
     cookie.expires = nil
-    ycookie = YAML.load(cookie.to_yaml)
+    ycookie = load_yaml(cookie.to_yaml)
     assert_equal true, ycookie.session?
     assert_equal nil, ycookie.max_age
 
     cookie.expires = Time.now + 3600
-    ycookie = YAML.load(cookie.to_yaml)
+    ycookie = load_yaml(cookie.to_yaml)
     assert_equal false, ycookie.session?
     assert_equal nil, ycookie.max_age
     assert_in_delta cookie.expires, ycookie.expires, 1
 
     cookie.max_age = 3600
-    ycookie = YAML.load(cookie.to_yaml)
+    ycookie = load_yaml(cookie.to_yaml)
     assert_equal false, ycookie.session?
     assert_in_delta cookie.created_at + 3600, ycookie.expires, 1
 
     cookie.max_age = nil
-    ycookie = YAML.load(cookie.to_yaml)
+    ycookie = load_yaml(cookie.to_yaml)
     assert_equal true, ycookie.session?
     assert_equal nil, ycookie.expires
   end
